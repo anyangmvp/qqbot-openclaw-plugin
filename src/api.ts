@@ -56,18 +56,21 @@ export function clearTokenCache(): void {
 /**
  * msg_seq 追踪器 - 用于对同一条消息的多次回复
  * key: msg_id, value: 当前 seq 值
+ * 使用时间戳作为基础值，确保进程重启后不会重复
  */
 const msgSeqTracker = new Map<string, number>();
+const seqBaseTime = Math.floor(Date.now() / 1000) % 100000000; // 取秒级时间戳的后8位作为基础
 
 /**
  * 获取并递增消息序号
+ * 返回的 seq 会基于时间戳，避免进程重启后重复
  */
 export function getNextMsgSeq(msgId: string): number {
   const current = msgSeqTracker.get(msgId) ?? 0;
   const next = current + 1;
   msgSeqTracker.set(msgId, next);
   
-  // 清理过期的序号（超过 5 次或 60 分钟后无意义）
+  // 清理过期的序号
   // 简单策略：保留最近 1000 条
   if (msgSeqTracker.size > 1000) {
     const keys = Array.from(msgSeqTracker.keys());
@@ -76,7 +79,8 @@ export function getNextMsgSeq(msgId: string): number {
     }
   }
   
-  return next;
+  // 结合时间戳基础值，确保唯一性
+  return seqBaseTime + next;
 }
 
 /**
