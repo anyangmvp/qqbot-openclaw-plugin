@@ -386,8 +386,13 @@ MEDIA:/绝对路径/图片文件.png
                   timeoutId = null;
                 }
 
+                log?.info(`[qqbot:${account.accountId}] deliver called, payload: ${JSON.stringify(payload).slice(0, 200)}`);
+
                 let replyText = payload.text ?? "";
-                if (!replyText.trim()) return;
+                if (!replyText.trim()) {
+                  log?.info(`[qqbot:${account.accountId}] Empty reply text, skipping`);
+                  return;
+                }
 
                 // 提取回复中的图片
                 const imageUrls: string[] = [];
