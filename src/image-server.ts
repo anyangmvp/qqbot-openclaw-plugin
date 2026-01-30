@@ -326,10 +326,94 @@ export function saveImage(
 }
 
 /**
+ * 从本地文件路径保存图片到图床
+ * @param filePath 本地文件路径
+ * @param ttlSeconds 过期时间（秒），默认使用配置值
+ * @returns 图片访问 URL，如果文件不存在或不是图片则返回 null
+ */
+export function saveImageFromPath(filePath: string, ttlSeconds?: number): string | null {
+  try {
+    // 检查文件是否存在
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    // 读取文件
+    const buffer = fs.readFileSync(filePath);
+    
+    // 根据扩展名获取 MIME 类型
+    const ext = path.extname(filePath).toLowerCase().replace(".", "");
+    const mimeType = getMimeType(ext);
+    
+    // 只处理图片文件
+    if (!mimeType.startsWith("image/")) {
+      return null;
+    }
+
+    // 使用 saveImage 保存
+    return saveImage(buffer, mimeType, ttlSeconds);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 检查图床服务器是否运行中
  */
 export function isImageServerRunning(): boolean {
   return serverInstance !== null;
+}
+
+/**
+ * 下载远程文件并保存到本地
+ * @param url 远程文件 URL
+ * @param destDir 目标目录
+ * @param filename 文件名（可选，不含扩展名）
+ * @returns 本地文件路径，失败返回 null
+ */
+export async function downloadFile(
+  url: string,
+  destDir: string,
+  filename?: string
+): Promise<string | null> {
+  try {
+    // 确保目录存在
+    if (!fs.existsSync(destDir)) {
+      fs.mkdirSync(destDir, { recursive: true });
+    }
+
+    // 下载文件
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`[image-server] Download failed: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    
+    // 从 Content-Type 或 URL 推断扩展名
+    const contentType = response.headers.get("content-type") || "";
+    let ext = getExtFromMime(contentType);
+    if (ext === "png" && !contentType.includes("png")) {
+      // 尝试从 URL 获取扩展名
+      const urlExt = url.match(/\.(\w+)(?:\?|$)/)?.[1]?.toLowerCase();
+      if (urlExt && ["png", "jpg", "jpeg", "gif", "webp", "pdf", "doc", "docx", "txt", "json", "jsonl"].includes(urlExt)) {
+        ext = urlExt;
+      }
+    }
+
+    // 生成文件名
+    const finalFilename = `${filename || generateImageId()}.${ext}`;
+    const filePath = path.join(destDir, finalFilename);
+
+    // 保存文件
+    fs.writeFileSync(filePath, buffer);
+    
+    return filePath;
+  } catch (err) {
+    console.error(`[image-server] Download error:`, err);
+    return null;
+  }
 }
 
 /**

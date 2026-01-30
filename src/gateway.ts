@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import type { ResolvedQQBotAccount, WSPayload, C2CMessageEvent, GuildMessageEvent, GroupMessageEvent } from "./types.js";
 import { getAccessToken, getGatewayUrl, sendC2CMessage, sendChannelMessage, sendGroupMessage, clearTokenCache, sendC2CImageMessage, sendGroupImageMessage } from "./api.js";
 import { getQQBotRuntime } from "./runtime.js";
-import { startImageServer, saveImage, isImageServerRunning, type ImageServerConfig } from "./image-server.js";
+import { startImageServer, saveImage, saveImageFromPath, isImageServerRunning, downloadFile, type ImageServerConfig } from "./image-server.js";
 
 // QQ Bot intents - 按权限级别分组
 const INTENTS = {
@@ -237,16 +237,32 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           systemPrompts.push(account.systemPrompt);
         }
         
-        // 处理附件（图片等）
+        // 处理附件（图片等）- 下载到本地供 clawdbot 访问
         let attachmentInfo = "";
         const imageUrls: string[] = [];
+        const downloadDir = process.env.QQBOT_DOWNLOAD_DIR || "./qqbot-downloads";
+        
         if (event.attachments?.length) {
           for (const att of event.attachments) {
-            if (att.content_type?.startsWith("image/")) {
-              imageUrls.push(att.url);
-              attachmentInfo += `\n[图片: ${att.url}]`;
+            // 下载附件到本地
+            const localPath = await downloadFile(att.url, downloadDir);
+            if (localPath) {
+              if (att.content_type?.startsWith("image/")) {
+                imageUrls.push(localPath);
+                attachmentInfo += `\n[图片: ${localPath}]`;
+              } else {
+                attachmentInfo += `\n[附件: ${localPath}]`;
+              }
+              log?.info(`[qqbot:${account.accountId}] Downloaded attachment to: ${localPath}`);
             } else {
-              attachmentInfo += `\n[附件: ${att.filename ?? att.content_type}]`;
+              // 下载失败，提供原始 URL 作为后备
+              log?.error(`[qqbot:${account.accountId}] Failed to download attachment: ${att.url}`);
+              if (att.content_type?.startsWith("image/")) {
+                imageUrls.push(att.url);
+                attachmentInfo += `\n[图片: ${att.url}] (下载失败，可能无法访问)`;
+              } else {
+                attachmentInfo += `\n[附件: ${att.filename ?? att.content_type}] (下载失败)`;
+              }
             }
           }
         }
@@ -366,6 +382,30 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
                 // 提取回复中的图片
                 const imageUrls: string[] = [];
                 
+                // 0. 提取 MEDIA: 前缀的本地文件路径
+                const mediaPathRegex = /MEDIA:([^\s\n]+)/gi;
+                const mediaMatches = [...replyText.matchAll(mediaPathRegex)];
+                
+                for (const match of mediaMatches) {
+                  const localPath = match[1];
+                  if (localPath && imageServerBaseUrl) {
+                    // 将本地文件复制到图床
+                    try {
+                      const savedUrl = saveImageFromPath(localPath);
+                      if (savedUrl) {
+                        imageUrls.push(savedUrl);
+                        log?.info(`[qqbot:${account.accountId}] Saved local image to server: ${localPath}`);
+                      } else {
+                        log?.error(`[qqbot:${account.accountId}] Failed to save local image (not found or not image): ${localPath}`);
+                      }
+                    } catch (err) {
+                      log?.error(`[qqbot:${account.accountId}] Failed to save local image: ${err}`);
+                    }
+                  }
+                  // 从文本中移除 MEDIA: 行
+                  replyText = replyText.replace(match[0], "").trim();
+                }
+                
                 // 1. 提取 base64 图片（data:image/xxx;base64,...）
                 const base64ImageRegex = /!\[([^\]]*)\]\((data:image\/[^;]+;base64,[A-Za-z0-9+/=]+)\)|(?<![(\[])(data:image\/[^;]+;base64,[A-Za-z0-9+/=]+)/gi;
                 const base64Matches = [...replyText.matchAll(base64ImageRegex)];
@@ -464,12 +504,13 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
                   clearTimeout(timeoutId);
                   timeoutId = null;
                 }
-                // 发送错误提示给用户
+                // 发送错误提示给用户，显示完整错误信息
                 const errMsg = String(err);
                 if (errMsg.includes("401") || errMsg.includes("key") || errMsg.includes("auth")) {
                   await sendErrorMessage("[ClawdBot] 大模型 API Key 可能无效，请检查配置");
                 } else {
-                  await sendErrorMessage(`[ClawdBot] 处理消息时出错: ${errMsg.slice(0, 100)}`);
+                  // 显示完整错误信息，截取前 500 字符
+                  await sendErrorMessage(`[ClawdBot] 出错: ${errMsg.slice(0, 500)}`);
                 }
               },
             },
@@ -490,7 +531,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           }
         } catch (err) {
           log?.error(`[qqbot:${account.accountId}] Message processing failed: ${err}`);
-          await sendErrorMessage(`[ClawdBot] 处理消息失败: ${String(err).slice(0, 100)}`);
+          await sendErrorMessage(`[ClawdBot] 处理失败: ${String(err).slice(0, 500)}`);
         }
       };
 
