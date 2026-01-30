@@ -5,13 +5,16 @@ import { getQQBotRuntime } from "./runtime.js";
 
 // QQ Bot intents
 const INTENTS = {
-  PUBLIC_GUILD_MESSAGES: 1 << 30,  // 频道公开消息
-  DIRECT_MESSAGE: 1 << 12,         // 频道私信
-  GROUP_AND_C2C: 1 << 25,          // 群聊和 C2C 私聊
+  GUILDS: 1 << 0,                    // 频道相关
+  GUILD_MEMBERS: 1 << 1,             // 频道成员
+  PUBLIC_GUILD_MESSAGES: 1 << 30,    // 频道公开消息（公域）
+  DIRECT_MESSAGE: 1 << 12,           // 频道私信
+  GROUP_AND_C2C: 1 << 25,            // 群聊和 C2C 私聊（需申请）
 };
 
 // 重连配置
 const RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000, 60000]; // 递增延迟
+const RATE_LIMIT_DELAY = 60000; // 遇到频率限制时等待 60 秒
 const MAX_RECONNECT_ATTEMPTS = 100;
 const MAX_QUICK_DISCONNECT_COUNT = 3; // 连续快速断开次数阈值
 const QUICK_DISCONNECT_THRESHOLD = 5000; // 5秒内断开视为快速断开
@@ -47,9 +50,17 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   let lastSeq: number | null = null;
   let lastConnectTime: number = 0; // 上次连接成功的时间
   let quickDisconnectCount = 0; // 连续快速断开次数
+  let isConnecting = false; // 防止并发连接
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null; // 重连定时器
+  let shouldRefreshToken = false; // 下次连接是否需要刷新 token
+  let identifyFailCount = 0; // identify 失败次数
 
   abortSignal.addEventListener("abort", () => {
     isAborted = true;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
     cleanup();
   });
 
@@ -69,17 +80,24 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     return RECONNECT_DELAYS[idx];
   };
 
-  const scheduleReconnect = () => {
+  const scheduleReconnect = (customDelay?: number) => {
     if (isAborted || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       log?.error(`[qqbot:${account.accountId}] Max reconnect attempts reached or aborted`);
       return;
     }
 
-    const delay = getReconnectDelay();
+    // 取消已有的重连定时器
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
+    const delay = customDelay ?? getReconnectDelay();
     reconnectAttempts++;
     log?.info(`[qqbot:${account.accountId}] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
 
-    setTimeout(() => {
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
       if (!isAborted) {
         connect();
       }
@@ -87,11 +105,23 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   };
 
   const connect = async () => {
+    // 防止并发连接
+    if (isConnecting) {
+      log?.debug?.(`[qqbot:${account.accountId}] Already connecting, skip`);
+      return;
+    }
+    isConnecting = true;
+
     try {
       cleanup();
 
-      // 刷新 token（可能过期了）
-      clearTokenCache();
+      // 如果标记了需要刷新 token，则清除缓存
+      if (shouldRefreshToken) {
+        log?.info(`[qqbot:${account.accountId}] Refreshing token...`);
+        clearTokenCache();
+        shouldRefreshToken = false;
+      }
+      
       const accessToken = await getAccessToken(account.appId, account.clientSecret);
       const gatewayUrl = await getGatewayUrl(accessToken);
 
@@ -337,7 +367,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
             }
             if (!hasResponse) {
               log?.error(`[qqbot:${account.accountId}] No response within timeout`);
-              await sendErrorMessage("[ClawdBot] 未收到响应，请检查大模型 API Key 是否正确配置");
+              await sendErrorMessage("[ClawdBot] QQ响应正常，但未收到clawdbot响应，请检查大模型是否正确配置");
             }
           }
         } catch (err) {
@@ -348,6 +378,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 
       ws.on("open", () => {
         log?.info(`[qqbot:${account.accountId}] WebSocket connected`);
+        isConnecting = false; // 连接完成，释放锁
         reconnectAttempts = 0; // 连接成功，重置重试计数
         lastConnectTime = Date.now(); // 记录连接时间
       });
@@ -378,11 +409,22 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
                 }));
               } else {
                 // 新连接，发送 Identify
+                // 如果 identify 失败多次，尝试只使用基础权限
+                let intents: number;
+                if (identifyFailCount >= 3) {
+                  // 只使用基础权限（频道消息）
+                  intents = INTENTS.PUBLIC_GUILD_MESSAGES | INTENTS.GUILD_MEMBERS;
+                  log?.info(`[qqbot:${account.accountId}] Using basic intents only (after ${identifyFailCount} failures): ${intents}`);
+                } else {
+                  // 使用完整权限
+                  intents = INTENTS.PUBLIC_GUILD_MESSAGES | INTENTS.DIRECT_MESSAGE | INTENTS.GROUP_AND_C2C;
+                  log?.info(`[qqbot:${account.accountId}] Sending identify with intents: ${intents}`);
+                }
                 ws.send(JSON.stringify({
                   op: 2,
                   d: {
                     token: `QQBot ${accessToken}`,
-                    intents: INTENTS.PUBLIC_GUILD_MESSAGES | INTENTS.DIRECT_MESSAGE | INTENTS.GROUP_AND_C2C,
+                    intents: intents,
                     shard: [0, 1],
                   },
                 }));
@@ -403,6 +445,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
               if (t === "READY") {
                 const readyData = d as { session_id: string };
                 sessionId = readyData.session_id;
+                identifyFailCount = 0; // 连接成功，重置失败计数
                 log?.info(`[qqbot:${account.accountId}] Ready, session: ${sessionId}`);
                 onReady?.(d);
               } else if (t === "RESUMED") {
@@ -472,9 +515,18 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
               if (!canResume) {
                 sessionId = null;
                 lastSeq = null;
+                identifyFailCount++;
+                // 标记需要刷新 token（可能是 token 过期导致的）
+                shouldRefreshToken = true;
+                
+                if (identifyFailCount >= 3) {
+                  log?.error(`[qqbot:${account.accountId}] Identify failed ${identifyFailCount} times. This may be a permission issue.`);
+                  log?.error(`[qqbot:${account.accountId}] Please check: 1) AppID/Secret is correct 2) Bot has GROUP_AND_C2C permission on QQ Open Platform`);
+                }
               }
               cleanup();
-              scheduleReconnect();
+              // Invalid Session 后等待一段时间再重连
+              scheduleReconnect(5000);
               break;
           }
         } catch (err) {
@@ -484,6 +536,15 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 
       ws.on("close", (code, reason) => {
         log?.info(`[qqbot:${account.accountId}] WebSocket closed: ${code} ${reason.toString()}`);
+        isConnecting = false; // 释放锁
+        
+        // 4903 等错误码表示 session 创建失败，需要刷新 token
+        if (code === 4903 || code === 4009 || code === 4014) {
+          log?.info(`[qqbot:${account.accountId}] Session error (${code}), will refresh token`);
+          shouldRefreshToken = true;
+          sessionId = null;
+          lastSeq = null;
+        }
         
         // 检测是否是快速断开（连接后很快就断了）
         const connectionDuration = Date.now() - lastConnectTime;
@@ -491,12 +552,19 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           quickDisconnectCount++;
           log?.info(`[qqbot:${account.accountId}] Quick disconnect detected (${connectionDuration}ms), count: ${quickDisconnectCount}`);
           
-          // 如果连续快速断开超过阈值，清除 session 重新 identify
+          // 如果连续快速断开超过阈值，清除 session 并等待更长时间
           if (quickDisconnectCount >= MAX_QUICK_DISCONNECT_COUNT) {
-            log?.info(`[qqbot:${account.accountId}] Too many quick disconnects, clearing session to re-identify`);
+            log?.info(`[qqbot:${account.accountId}] Too many quick disconnects, clearing session and refreshing token`);
             sessionId = null;
             lastSeq = null;
+            shouldRefreshToken = true;
             quickDisconnectCount = 0;
+            cleanup();
+            // 快速断开太多次，等待更长时间再重连
+            if (!isAborted && code !== 1000) {
+              scheduleReconnect(RATE_LIMIT_DELAY);
+            }
+            return;
           }
         } else {
           // 连接持续时间够长，重置计数
@@ -517,8 +585,17 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
       });
 
     } catch (err) {
+      isConnecting = false; // 释放锁
+      const errMsg = String(err);
       log?.error(`[qqbot:${account.accountId}] Connection failed: ${err}`);
-      scheduleReconnect();
+      
+      // 如果是频率限制错误，等待更长时间
+      if (errMsg.includes("Too many requests") || errMsg.includes("100001")) {
+        log?.info(`[qqbot:${account.accountId}] Rate limited, waiting ${RATE_LIMIT_DELAY}ms before retry`);
+        scheduleReconnect(RATE_LIMIT_DELAY);
+      } else {
+        scheduleReconnect();
+      }
     }
   };
 

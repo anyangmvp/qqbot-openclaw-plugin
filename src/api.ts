@@ -16,13 +16,23 @@ export async function getAccessToken(appId: string, clientSecret: string): Promi
     return cachedToken.token;
   }
 
-  const response = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ appId, clientSecret }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ appId, clientSecret }),
+    });
+  } catch (err) {
+    throw new Error(`Network error getting access_token: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
-  const data = (await response.json()) as { access_token?: string; expires_in?: number };
+  let data: { access_token?: string; expires_in?: number };
+  try {
+    data = (await response.json()) as { access_token?: string; expires_in?: number };
+  } catch (err) {
+    throw new Error(`Failed to parse access_token response: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (!data.access_token) {
     throw new Error(`Failed to get access_token: ${JSON.stringify(data)}`);
@@ -91,8 +101,19 @@ export async function apiRequest<T = unknown>(
     options.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, options);
-  const data = (await res.json()) as T;
+  let res: Response;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    throw new Error(`Network error [${path}]: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  let data: T;
+  try {
+    data = (await res.json()) as T;
+  } catch (err) {
+    throw new Error(`Failed to parse response [${path}]: ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   if (!res.ok) {
     const error = data as { message?: string; code?: number };
