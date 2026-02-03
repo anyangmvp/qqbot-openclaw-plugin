@@ -11,24 +11,24 @@ QQ 开放平台Bot API 的 Moltbot 渠道插件，支持 C2C 私聊、群聊 @�
 - **错误提示**：AI 无响应时自动提示用户检查配置
 
 ## 使用示例：
-<img width="1852" height="1082" alt="image" src="https://github.com/user-attachments/assets/a16d582b-708c-473e-b3a2-e0c4c503a0c8" />
+<img width="952" height="582" alt="image" src="https://github.com/user-attachments/assets/a16d582b-708c-473e-b3a2-e0c4c503a0c8" />
 
 ## 版本更新
-<img width="1902" height="448" alt="Clipboard_Screenshot_1769739939" src="https://github.com/user-attachments/assets/d6f37458-900c-4de9-8fdc-f8e6bf5c7ee5" />
+<img width="902" height="248" alt="Clipboard_Screenshot_1769739939" src="https://github.com/user-attachments/assets/d6f37458-900c-4de9-8fdc-f8e6bf5c7ee5" />
 
 ### 1.3.0（即将更新）
 - 支持回复图片等功能
-  <img width="1824" height="728" alt="Clipboard_Screenshot_1770112572" src="https://github.com/user-attachments/assets/80f38ae9-dc40-4545-ad17-e7e254064cf4" />
+  <img width="924" height="428" alt="Clipboard_Screenshot_1770112572" src="https://github.com/user-attachments/assets/80f38ae9-dc40-4545-ad17-e7e254064cf4" />
 
 - 支持定时任务到时后主动推送
-  <img width="1830" height="488" alt="Clipboard_Screenshot_1770112539" src="https://github.com/user-attachments/assets/9674cda0-91e9-4860-8dcc-bc50007862a2" />
+  <img width="930" height="288" alt="Clipboard_Screenshot_1770112539" src="https://github.com/user-attachments/assets/9674cda0-91e9-4860-8dcc-bc50007862a2" />
 
 
 ### 1.2.5-2026.02.02
 - 解除URL发送限制，现在可以直接在私聊发送URL
-  <img width="1786" height="576" alt="Clipboard_Screenshot_1770092858" src="https://github.com/user-attachments/assets/c660949e-28a5-4e5f-abc2-77f0a2c67bad" />
+  <img width="886" height="276" alt="Clipboard_Screenshot_1770092858" src="https://github.com/user-attachments/assets/c660949e-28a5-4e5f-abc2-77f0a2c67bad" />
 - 更新Bot正在输入中状态
-   <img width="1440" height="412" alt="Clipboard_Screenshot_1770091969" src="https://github.com/user-attachments/assets/47835c4b-ccd2-4782-aaa6-b873cb58f7d7" />
+   <img width="740" height="212" alt="Clipboard_Screenshot_1770091969" src="https://github.com/user-attachments/assets/47835c4b-ccd2-4782-aaa6-b873cb58f7d7" />
 - 提供主动推送能力（目前AI还不知道怎么调用主动推送，相关完整Skill能力将在后续版本更新）
 - 优化一些已知问题
 - 优化未收到未收到大模型响应时的提示信息
