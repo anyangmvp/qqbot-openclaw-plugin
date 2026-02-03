@@ -20,7 +20,7 @@ QQ 开放平台Bot API 的 Moltbot 渠道插件，支持 C2C 私聊、群聊 @�
 - 支持回复图片等功能
 - 支持定时任务到时后主动推送
 
-### 1.2.5
+### 1.2.5-2026.02.02
 - 解除URL发送限制，现在可以直接在私聊发送URL
   <img width="1786" height="576" alt="Clipboard_Screenshot_1770092858" src="https://github.com/user-attachments/assets/c660949e-28a5-4e5f-abc2-77f0a2c67bad" />
 - 更新Bot正在输入中状态
