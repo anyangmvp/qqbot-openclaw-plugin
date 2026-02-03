@@ -1188,11 +1188,7 @@ openclaw cron add \\
                   
                   // 处理文本中的 URL 点号（防止被 QQ 解析为链接）
                   if (textWithoutImages) {
-                    const originalText = textWithoutImages;
                     textWithoutImages = textWithoutImages.replace(/([a-zA-Z0-9])\.([a-zA-Z0-9])/g, "$1_$2");
-                    if (textWithoutImages !== originalText && textWithoutImages.trim()) {
-                      textWithoutImages += "\n\n（由于平台限制，回复中的部分符号已被替换）";
-                    }
                   }
                   
                   try {

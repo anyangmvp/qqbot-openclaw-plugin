@@ -6,8 +6,7 @@
   "skills": ["skills/qqbot-cron", "skills/qqbot-media"],
   "capabilities": {
     "proactiveMessaging": true,
-    "cronJobs": true,
-    "streamingMessages": true
+    "cronJobs": true
   },
   "configSchema": {
     "type": "object",
