@@ -2,19 +2,12 @@
 
 QQ 开放平台Bot API 的 Moltbot 渠道插件，支持 C2C 私聊、群聊 @消息、频道消息。
 
-## 功能特性
-
-- **多场景支持**：C2C 单聊、QQ 群 @消息、频道公开消息、频道私信
-- **自动重连**：WebSocket 断连后自动重连，支持 Session Resume
-- **消息去重**：自动管理 `msg_seq`，支持对同一消息多次回复
-- **系统提示词**：可配置自定义系统提示词注入到 AI 请求
-- **错误提示**：AI 无响应时自动提示用户检查配置
-
 ## 使用示例：
-<img width="952" height="582" alt="image" src="https://github.com/user-attachments/assets/a16d582b-708c-473e-b3a2-e0c4c503a0c8" />
+<img width="1440" height="4719" alt="Clipboard_Screenshot_1770195414" src="https://github.com/user-attachments/assets/6f1704ab-584b-497e-8937-96f84ce2958f" />
+
 
 ## 版本更新
-**使用`openclaw plugins list`来产看插件版本，建议使用最新版的版本**
+**使用`openclaw plugins list`来查看插件版本，建议使用最新版的版本**
 <img width="902" height="248" alt="Clipboard_Screenshot_1769739939" src="https://github.com/user-attachments/assets/d6f37458-900c-4de9-8fdc-f8e6bf5c7ee5" />
 
 ### 1.4.0（即将更新）
