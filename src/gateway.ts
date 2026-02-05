@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import path from "node:path";
 import * as fs from "node:fs";
 import type { ResolvedQQBotAccount, WSPayload, C2CMessageEvent, GuildMessageEvent, GroupMessageEvent } from "./types.js";
-import { getAccessToken, getGatewayUrl, sendC2CMessage, sendChannelMessage, sendGroupMessage, clearTokenCache, sendC2CImageMessage, sendGroupImageMessage, initApiConfig, startBackgroundTokenRefresh, stopBackgroundTokenRefresh } from "./api.js";
+import { getAccessToken, getGatewayUrl, sendC2CMessage, sendChannelMessage, sendGroupMessage, clearTokenCache, sendC2CImageMessage, sendGroupImageMessage, initApiConfig, startBackgroundTokenRefresh, stopBackgroundTokenRefresh, sendC2CInputNotify } from "./api.js";
 import { loadSession, saveSession, clearSession, type SessionState } from "./session-store.js";
 import { recordKnownUser, flushKnownUsers } from "./known-users.js";
 import { getQQBotRuntime } from "./runtime.js";
@@ -412,6 +412,13 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           direction: "inbound",
         });
 
+        try{
+          await sendC2CInputNotify(accessToken, event.senderId, event.messageId, 60);
+          log?.info(`[qqbot:${account.accountId}] Sent input notify to ${event.senderId}`);
+        }catch(err){
+          log?.error(`[qqbot:${account.accountId}] sendC2CInputNotify error: ${err}`);
+        }
+
         const isGroup = event.type === "guild" || event.type === "group";
         const peerId = event.type === "guild" ? `channel:${event.channelId}` 
                      : event.type === "group" ? `group:${event.groupOpenid}`
@@ -810,7 +817,7 @@ openclaw cron add \\
                         log?.info(`[qqbot:${account.accountId}] Sent image via <qqimg> tag: ${imagePath.slice(0, 60)}...`);
                       } catch (err) {
                         log?.error(`[qqbot:${account.accountId}] Failed to send image from <qqimg>: ${err}`);
-                        await sendErrorMessage(`发送图片失败: ${err}`);
+                        await sendErrorMessage(`图片发送失败，图片似乎不存在哦，图片路径：${imagePath}`);
                       }
                     }
                   }
@@ -1250,7 +1257,9 @@ openclaw cron add \\
                 }
               },
             },
-            replyOptions: {},
+            replyOptions: {
+              disableBlockStreaming: false,
+            },
           });
 
           // 等待分发完成或超时
