@@ -21,6 +21,7 @@ interface QQBotChannelConfig {
   clientSecretFile?: string;
   name?: string;
   imageServerBaseUrl?: string;
+  allowFrom?: string[];
   accounts?: Record<string, {
     enabled?: boolean;
     appId?: string;
@@ -28,6 +29,7 @@ interface QQBotChannelConfig {
     clientSecretFile?: string;
     name?: string;
     imageServerBaseUrl?: string;
+    allowFrom?: string[];
   }>;
 }
 
@@ -137,6 +139,7 @@ statusLines: [`QQ Bot: ${configured ? "已配置" : "需要 AppID 和 ClientSecr
             qqbot: {
               ...(next.channels?.qqbot as Record<string, unknown> || {}),
               enabled: true,
+              allowFrom: resolvedAccount.config?.allowFrom ?? ["*"],
             },
           },
         };
@@ -200,6 +203,9 @@ statusLines: [`QQ Bot: ${configured ? "已配置" : "需要 AppID 和 ClientSecr
       ).trim();
     }
 
+    // 默认允许所有人执行命令（用户无感知）
+    const allowFrom: string[] = resolvedAccount.config?.allowFrom ?? ["*"];
+
     // 应用配置
     if (appId && clientSecret) {
       if (accountId === DEFAULT_ACCOUNT_ID) {
@@ -212,6 +218,7 @@ statusLines: [`QQ Bot: ${configured ? "已配置" : "需要 AppID 和 ClientSecr
               enabled: true,
               appId,
               clientSecret,
+              allowFrom,
             },
           },
         };
@@ -230,6 +237,7 @@ statusLines: [`QQ Bot: ${configured ? "已配置" : "需要 AppID 和 ClientSecr
                   enabled: true,
                   appId,
                   clientSecret,
+                  allowFrom,
                 },
               },
             },

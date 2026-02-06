@@ -120,6 +120,20 @@ export const qqbotPlugin: ChannelPlugin<ResolvedQQBotAccount> = {
       configured: Boolean(account?.appId && account?.clientSecret),
       tokenSource: account?.secretSource,
     }),
+    // 关键：解析 allowFrom 配置，用于命令授权
+    resolveAllowFrom: ({ cfg, accountId }: { cfg: OpenClawConfig; accountId?: string }) => {
+      const account = resolveQQBotAccount(cfg, accountId);
+      const allowFrom = account.config?.allowFrom ?? [];
+      console.log(`[qqbot] resolveAllowFrom: accountId=${accountId}, allowFrom=${JSON.stringify(allowFrom)}`);
+      return allowFrom.map((entry: string | number) => String(entry));
+    },
+    // 格式化 allowFrom 条目（移除 qqbot: 前缀，统一大写）
+    formatAllowFrom: ({ allowFrom }: { allowFrom: Array<string | number> }) =>
+      allowFrom
+        .map((entry: string | number) => String(entry).trim())
+        .filter(Boolean)
+        .map((entry: string) => entry.replace(/^qqbot:/i, ""))
+        .map((entry: string) => entry.toUpperCase()), // QQ openid 是大写的
   },
   setup: {
     // 新增：规范化账户 ID
@@ -157,18 +171,6 @@ export const qqbotPlugin: ChannelPlugin<ResolvedQQBotAccount> = {
         name: input.name,
         imageServerBaseUrl: input.imageServerBaseUrl,
       });
-    },
-  },
-  // 新增：消息目标解析
-  messaging: {
-    normalizeTarget: (target) => {
-      // 支持格式: qqbot:openid, qqbot:group:xxx, openid, group:xxx
-      const normalized = target.replace(/^qqbot:/i, "");
-      return { ok: true, to: normalized };
-    },
-    targetResolver: {
-      looksLikeId: (id) => /^[A-F0-9]{32}$/i.test(id) || id.startsWith("group:") || id.startsWith("channel:"),
-      hint: "<openid> or group:<groupOpenid>",
     },
   },
   outbound: {

@@ -1,9 +1,22 @@
 {
-  "name": "qqbot",
-  "version": "1.3.0",
+  "name": "@sliverp/qqbot",
+  "version": "1.3.14",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "qqbot": "./bin/qqbot-cli.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "src",
+    "index.ts",
+    "tsconfig.json",
+    "openclaw.plugin.json",
+    "clawdbot.plugin.json",
+    "moltbot.plugin.json"
+  ],
   "clawdbot": {
     "extensions": ["./index.ts"]
   },
@@ -33,5 +46,6 @@
     "clawdbot": "*",
     "moltbot": "*",
     "openclaw": "*"
-  }
+  },
+  "homepage": "https://github.com/sliverp/qqbot"
 }

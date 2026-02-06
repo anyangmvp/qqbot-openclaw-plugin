@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import path from "node:path";
 import * as fs from "node:fs";
 import type { ResolvedQQBotAccount, WSPayload, C2CMessageEvent, GuildMessageEvent, GroupMessageEvent } from "./types.js";
-import { getAccessToken, getGatewayUrl, sendC2CMessage, sendChannelMessage, sendGroupMessage, clearTokenCache, sendC2CImageMessage, sendGroupImageMessage, initApiConfig, startBackgroundTokenRefresh, stopBackgroundTokenRefresh } from "./api.js";
+import { getAccessToken, getGatewayUrl, sendC2CMessage, sendChannelMessage, sendGroupMessage, clearTokenCache, sendC2CImageMessage, sendGroupImageMessage, initApiConfig, startBackgroundTokenRefresh, stopBackgroundTokenRefresh, sendC2CInputNotify } from "./api.js";
 import { loadSession, saveSession, clearSession, type SessionState } from "./session-store.js";
 import { recordKnownUser, flushKnownUsers } from "./known-users.js";
 import { getQQBotRuntime } from "./runtime.js";
@@ -412,6 +412,13 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           direction: "inbound",
         });
 
+        try{
+          await sendC2CInputNotify(accessToken, event.senderId, event.messageId, 60);
+          log?.info(`[qqbot:${account.accountId}] Sent input notify to ${event.senderId}`);
+        }catch(err){
+          log?.error(`[qqbot:${account.accountId}] sendC2CInputNotify error: ${err}`);
+        }
+
         const isGroup = event.type === "guild" || event.type === "group";
         const peerId = event.type === "guild" ? `channel:${event.channelId}` 
                      : event.type === "group" ? `group:${event.groupOpenid}`
@@ -568,10 +575,15 @@ openclaw cron add \\
         }
         
         const userContent = event.content + attachmentInfo;
-        const messageBody = `【系统提示】\n${systemPrompts.join("\n")}\n\n【用户输入】\n${userContent}`;
+        let messageBody = `【系统提示】\n${systemPrompts.join("\n")}\n\n【用户输入】\n${userContent}`;
+
+        if(userContent.startsWith("/")){ // 保留Openclaw原始命令
+          messageBody = userContent
+        }
+        log?.info(`[qqbot:${account.accountId}] messageBody: ${messageBody}`);
 
         const body = pluginRuntime.channel.reply.formatInboundEnvelope({
-          channel: "QQBot",
+          channel: "qqbot",
           from: event.senderName ?? event.senderId,
           timestamp: new Date(event.timestamp).getTime(),
           body: messageBody,
@@ -589,6 +601,14 @@ openclaw cron add \\
                          : event.type === "group" ? `qqbot:group:${event.groupOpenid}`
                          : `qqbot:c2c:${event.senderId}`;
         const toAddress = fromAddress;
+
+        // 计算命令授权状态
+        // allowFrom: ["*"] 表示允许所有人，否则检查 senderId 是否在 allowFrom 列表中
+        const allowFromList = account.config?.allowFrom ?? [];
+        const allowAll = allowFromList.length === 0 || allowFromList.some((entry: string) => entry === "*");
+        const commandAuthorized = allowAll || allowFromList.some((entry: string) => 
+          entry.toUpperCase() === event.senderId.toUpperCase()
+        );
 
         const ctxPayload = pluginRuntime.channel.reply.finalizeInboundContext({
           Body: body,
@@ -610,6 +630,7 @@ openclaw cron add \\
           QQChannelId: event.channelId,
           QQGuildId: event.guildId,
           QQGroupOpenid: event.groupOpenid,
+          CommandAuthorized: commandAuthorized,
         });
 
         // 发送消息的辅助函数，带 token 过期重试
@@ -810,7 +831,7 @@ openclaw cron add \\
                         log?.info(`[qqbot:${account.accountId}] Sent image via <qqimg> tag: ${imagePath.slice(0, 60)}...`);
                       } catch (err) {
                         log?.error(`[qqbot:${account.accountId}] Failed to send image from <qqimg>: ${err}`);
-                        await sendErrorMessage(`发送图片失败: ${err}`);
+                        await sendErrorMessage(`图片发送失败，图片似乎不存在哦，图片路径：${imagePath}`);
                       }
                     }
                   }
@@ -1250,7 +1271,9 @@ openclaw cron add \\
                 }
               },
             },
-            replyOptions: {},
+            replyOptions: {
+              disableBlockStreaming: false,
+            },
           });
 
           // 等待分发完成或超时
