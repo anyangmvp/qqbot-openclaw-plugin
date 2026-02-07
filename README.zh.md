@@ -7,13 +7,15 @@ QQ 是一款覆盖广泛用户群体的即时通讯平台，提供文字、语�
 
 OpenClaw plugins命令安装
 
-```openclaw plugins install @sliverp/qqbot@latest```
+```
+openclaw plugins install @sliverp/qqbot@latest
+```
 
 使用源码安装：
 
 ```
 git clone https://github.com/sliverp/qqbot.git && cd qqbot
-clawdbot plugins install .
+openclaw plugins install .
 ```
 
 # 步骤2:创建QQ Bot
@@ -43,7 +45,7 @@ clawdbot plugins install .
 QQ机器人创建完成之后，可选择机器人点击进入管理页面。
 <img width="3002" height="1536" alt="8" src="https://github.com/user-attachments/assets/7c0c7c69-29db-457f-974a-4aa52ebd7973" />
 
-在QQ机器人管理页面获取当前机器人的AppID和AppSecret，复制并将其保存到个人记事本或备忘录中（请注意数据安全，勿泄露），后续在“为OpenClaw配置QQ机器人AppID和AppSecret”步骤中需要使用。
+在QQ机器人管理页面获取当前机器人的AppID和AppSecret，复制并将其保存到个人记事本或备忘录中（请注意数据安全，勿泄露），后续在“步骤3中配置OpenClaw“中需要使用。
 
 注意：出于安全考虑，QQ机器人的AppSecret不支持明文保存，首次查看或忘记AppSecret需要重新生成。
 <img width="2970" height="1562" alt="9" src="https://github.com/user-attachments/assets/c7fc3094-2840-4780-a202-47b2c2b74e50" />
@@ -75,5 +77,37 @@ QQ开放平台不支持机器人的“在QQ群配置”操作，只支持单独�
 <img width="2902" height="1394" alt="16" src="https://github.com/user-attachments/assets/eb98ffce-490f-402c-8b0c-af7ede1b1303" />
 <img width="1306" height="672" alt="17" src="https://github.com/user-attachments/assets/799056e3-82a6-44bc-9e3d-9c840faafa41" />
 
-# 步骤3:配置OpenClaw
+# 步骤3: 配置OpenClaw
+## 方式一： 通过Wizard配置（推荐）
+
+添加qqbot channel 并将步骤2中获取的AppID和AppSecret
+```
+openclaw channels add --channel qqbot --token "AppID:AppSecret"
+```
+## 方式二：通过配置文件配置
+
+编辑 ~/.openclaw/openclaw.json:
+``` json
+{
+  "channels": {
+    "qqbot": {
+      "enabled": true,
+      "appId": "你的AppID",
+      "clientSecret": "你的AppSecret"
+    }
+  }
+}
+```
+
+# 步骤4：启动与测试
+
+## 1.启动gateway
+
+```
+openclaw gateway
+```
+
+## 2.在QQ中与QQbot 对话
+
+<img width="990" height="984" alt="18" src="https://github.com/user-attachments/assets/b2776c8b-de72-4e37-b34d-e8287ce45de1" />
 
