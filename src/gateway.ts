@@ -124,6 +124,29 @@ function recordMessageReply(messageId: string): void {
   }
 }
 
+// ============ QQ 表情标签解析 ============
+
+/**
+ * 解析 QQ 表情标签，将 <faceType=1,faceId="13",ext="base64..."> 格式
+ * 替换为 【表情: 中文名】 格式
+ * ext 字段为 Base64 编码的 JSON，格式如 {"text":"呲牙"}
+ */
+function parseFaceTags(text: string): string {
+  if (!text) return text;
+
+  // 匹配 <faceType=...,faceId="...",ext="..."> 格式的表情标签
+  return text.replace(/<faceType=\d+,faceId="[^"]*",ext="([^"]*)">/g, (_match, ext: string) => {
+    try {
+      const decoded = Buffer.from(ext, "base64").toString("utf-8");
+      const parsed = JSON.parse(decoded);
+      const faceName = parsed.text || "未知表情";
+      return `【表情: ${faceName}】`;
+    } catch {
+      return _match;
+    }
+  });
+}
+
 // ============ 内部标记过滤 ============
 
 /**
@@ -577,7 +600,9 @@ openclaw cron add \\
           }
         }
         
-        const userContent = event.content + attachmentInfo;
+        // 解析 QQ 表情标签，将 <faceType=...,ext="base64"> 替换为 【表情: 中文名】
+        const parsedContent = parseFaceTags(event.content);
+        const userContent = parsedContent + attachmentInfo;
         let messageBody = `【系统提示】\n${systemPrompts.join("\n")}\n\n【用户输入】\n${userContent}`;
 
         if(userContent.startsWith("/")){ // 保留Openclaw原始命令
