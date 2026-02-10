@@ -578,8 +578,6 @@ openclaw cron add \\
 用户发送了一条语音消息：
 - 语音文件：${result.wavPath}
 - 语音时长：${durationStr}
-- 原始文件：${localPath}
-- 消息ID：${event.messageId}
 - 发送时间：${timestamp}
 
 请使用语音文件进行语音转文字处理后回复用户。`);
