@@ -1,12 +1,11 @@
 {
   "id": "qqbot",
   "name": "QQ Bot Channel",
-  "description": "QQ Bot channel plugin with message support, cron jobs, and proactive messaging",
+  "description": "QQ Bot channel plugin with message support and proactive messaging",
   "channels": ["qqbot"],
-  "skills": ["skills/qqbot-cron", "skills/qqbot-media"],
+  "skills": ["skills/qqbot-media"],
   "capabilities": {
-    "proactiveMessaging": true,
-    "cronJobs": true
+    "proactiveMessaging": true
   },
   "configSchema": {
     "type": "object",

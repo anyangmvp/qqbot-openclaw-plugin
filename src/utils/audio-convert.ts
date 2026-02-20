@@ -222,6 +222,7 @@ export function needsSilkConversion(filePath: string): boolean {
 
 /**
  * 将 WAV 文件编码为 SILK 格式
+ * 使用 ffmpeg 将 WAV 转换为标准 PCM (s16le, 24000Hz, 单声道)，然后编码为 SILK
  * @param inputPath 输入 WAV 文件路径
  * @param outputDir 输出目录（默认与输入文件同目录）
  * @returns 转换后的 SILK 文件路径和时长
@@ -234,30 +235,68 @@ export async function encodeWavToSilk(
     return null;
   }
 
-  const fileBuf = fs.readFileSync(inputPath);
-  const rawData = new Uint8Array(fileBuf.buffer, fileBuf.byteOffset, fileBuf.length);
-
-  // 验证是否为 WAV 格式
-  if (!isWav(rawData)) {
+  // 检查 ffmpeg 是否可用
+  if (!isFfmpegAvailable()) {
+    console.error("[audio-convert] ffmpeg not available, cannot convert WAV to SILK");
     return null;
   }
 
-  // 获取 WAV 文件信息
-  const wavInfo = getWavFileInfo(rawData);
-  
-  // 编码为 SILK（采样率从 WAV 文件中获取）
-  const result = await encode(rawData, wavInfo.fmt.sampleRate);
-
-  // 写入 SILK 文件
   const dir = outputDir || path.dirname(inputPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
   const baseName = path.basename(inputPath, path.extname(inputPath));
+  const pcmPath = path.join(dir, `${baseName}.pcm`);
   const silkPath = path.join(dir, `${baseName}.silk`);
-  fs.writeFileSync(silkPath, result.data);
 
-  return { silkPath, duration: result.duration };
+  // SILK 推荐采样率
+  const targetSampleRate = 24000;
+
+  try {
+    // 使用 ffmpeg 转换为标准 PCM (s16le, 24000Hz, 单声道)
+    const ffmpegResult = childProcess.spawnSync(
+      "ffmpeg",
+      [
+        "-y",
+        "-i", inputPath,
+        "-ar", String(targetSampleRate),
+        "-ac", "1",
+        "-f", "s16le",
+        pcmPath,
+      ],
+      {
+        timeout: 60000,
+        stdio: "pipe",
+      },
+    );
+
+    if (ffmpegResult.status !== 0) {
+      console.error(`[audio-convert] ffmpeg failed: ${ffmpegResult.stderr?.toString()}`);
+      return null;
+    }
+
+    // 读取 PCM 数据
+    const pcmData = fs.readFileSync(pcmPath);
+    const rawPcm = new Uint8Array(pcmData.buffer, pcmData.byteOffset, pcmData.length);
+
+    // 编码为 SILK
+    const result = await encode(rawPcm, targetSampleRate);
+
+    // 写入 SILK 文件
+    fs.writeFileSync(silkPath, result.data);
+
+    // 清理临时 PCM 文件
+    try {
+      fs.unlinkSync(pcmPath);
+    } catch {
+      // 忽略清理错误
+    }
+
+    return { silkPath, duration: result.duration };
+  } catch (err) {
+    console.error(`[audio-convert] Failed to encode WAV to SILK: ${err}`);
+    return null;
+  }
 }
 
 /**
@@ -389,20 +428,13 @@ export async function convertAudioDataToSilk(
     return { data: rawData, duration };
   }
 
-  // 如果是 WAV 格式
-  if (format === "wav" || isWav(rawData)) {
-    const wavInfo = getWavFileInfo(rawData);
-    const result = await encode(rawData, wavInfo.fmt.sampleRate);
-    return { data: result.data, duration: result.duration };
-  }
-
-  // 如果是 PCM 格式
+  // 如果是 PCM 格式，直接编码
   if (format === "pcm" && sampleRate) {
     const result = await encode(rawData, sampleRate);
     return { data: result.data, duration: result.duration };
   }
 
-  // 其他格式需要写入临时文件，用 ffmpeg 转换
+  // WAV 和其他格式都需要用 ffmpeg 转换
   if (!isFfmpegAvailable()) {
     console.error("[audio-convert] ffmpeg not available for format:", format);
     return null;
@@ -420,7 +452,7 @@ export async function convertAudioDataToSilk(
     // 写入临时输入文件
     fs.writeFileSync(tmpInput, audioData);
 
-    // 使用 ffmpeg 转换为 PCM
+    // 使用 ffmpeg 转换为标准 PCM (s16le, 24000Hz, 单声道)
     const targetSampleRate = 24000;
     const ffmpegResult = childProcess.spawnSync(
       "ffmpeg",

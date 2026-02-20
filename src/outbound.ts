@@ -5,7 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ResolvedQQBotAccount } from "./types.js";
-import { decodeCronPayload } from "./utils/payload.js";
+
 import {
   getAccessToken, 
   sendC2CMessage, 
@@ -75,7 +75,8 @@ export function checkMessageReplyLimit(messageId: string): ReplyLimitResult {
   }
   
   // 检查是否超过1小时（message_id 过期）
-  if (now - record.firstReplyAt > MESSAGE_REPLY_TTL) {
+  const elapsed = now - record.firstReplyAt;
+  if (elapsed > MESSAGE_REPLY_TTL) {
     // 超过1小时，被动回复不可用，需要降级为主动消息
     return { 
       allowed: false, 
@@ -89,6 +90,7 @@ export function checkMessageReplyLimit(messageId: string): ReplyLimitResult {
   // 检查是否超过回复次数限制
   const remaining = MESSAGE_REPLY_LIMIT - record.count;
   if (remaining <= 0) {
+    console.log(`[qqbot] checkMessageReplyLimit: 已达到最大回复次数限制 (${MESSAGE_REPLY_LIMIT}次)，需降级为主动消息`);
     return { 
       allowed: false, 
       remaining: 0,
@@ -97,6 +99,8 @@ export function checkMessageReplyLimit(messageId: string): ReplyLimitResult {
       message: `该消息已达到1小时内最大回复次数(${MESSAGE_REPLY_LIMIT}次)，将使用主动消息发送`,
     };
   }
+  
+  console.log(`[qqbot] checkMessageReplyLimit: 允许回复，已回复 ${record.count} 次，剩余 ${remaining} 次`);
   
   return { 
     allowed: true, 
@@ -123,7 +127,7 @@ export function recordMessageReply(messageId: string): void {
       record.count++;
     }
   }
-  console.log(`[qqbot] recordMessageReply: ${messageId}, count=${messageReplyTracker.get(messageId)?.count}`);
+  console.log(`[qqbot] recordMessageReply: ${messageId?.slice(0, 20)}..., count=${messageReplyTracker.get(messageId)?.count}`);
 }
 
 /**
@@ -183,19 +187,24 @@ export interface OutboundResult {
  *   - 纯数字 -> 频道
  */
 function parseTarget(to: string): { type: "c2c" | "group" | "channel"; id: string } {
+  console.log(`[qqbot] parseTarget: 解析目标地址 ${to}`);
   // 去掉 qqbot: 前缀
   let id = to.replace(/^qqbot:/i, "");
   
   if (id.startsWith("c2c:")) {
+    console.log(`[qqbot] parseTarget: 识别为 C2C 单聊, id=${id.slice(4)}`);
     return { type: "c2c", id: id.slice(4) };
   }
   if (id.startsWith("group:")) {
+    console.log(`[qqbot] parseTarget: 识别为群聊, id=${id.slice(6)}`);
     return { type: "group", id: id.slice(6) };
   }
   if (id.startsWith("channel:")) {
+    console.log(`[qqbot] parseTarget: 识别为频道, id=${id.slice(8)}`);
     return { type: "channel", id: id.slice(8) };
   }
   // 默认当作 c2c（私聊）
+  console.log(`[qqbot] parseTarget: 默认识别为 C2C 单聊, id=${id}`);
   return { type: "c2c", id };
 }
 
@@ -235,7 +244,7 @@ export async function sendText(ctx: OutboundContext): Promise<OutboundResult> {
         };
       }
     } else {
-      console.log(`[qqbot] sendText: 消息 ${replyToId} 剩余被动回复次数: ${limitCheck.remaining}/${MESSAGE_REPLY_LIMIT}`);
+      console.log(`[qqbot] sendText: 消息 ${replyToId?.slice(0, 20)}... 剩余被动回复次数: ${limitCheck.remaining}/${MESSAGE_REPLY_LIMIT}`);
     }
   }
 
@@ -305,7 +314,7 @@ export async function sendText(ctx: OutboundContext): Promise<OutboundResult> {
 
 /**
  * 主动发送消息（不需要 replyToId，有配额限制：每月 4 条/用户/群）
- * 
+ *
  * @param account - 账户配置
  * @param to - 目标地址，格式：openid（单聊）或 group:xxx（群聊）
  * @param text - 消息内容
@@ -397,6 +406,7 @@ export async function sendProactiveMessage(
 export async function sendMedia(ctx: MediaOutboundContext): Promise<OutboundResult> {
   const { to, text, replyToId, account } = ctx;
   const { mediaUrl, mediaType = "image" } = ctx;
+  console.log(`[qqbot] sendMedia: start sending media message, target=${to}, type=${mediaType}`);
 
   if (!account.appId || !account.clientSecret) {
     return { channel: "qqbot", error: "QQBot not configured (missing appId or clientSecret)" };
@@ -418,11 +428,12 @@ export async function sendMedia(ctx: MediaOutboundContext): Promise<OutboundResu
   let processedMediaUrl = mediaUrl;
 
   if (isLocalPath) {
-    console.log(`[qqbot] sendMedia: local file path detected: ${mediaUrl}`);
+    console.log(`[qqbot] sendMedia: detected local file path: ${mediaUrl}`);
 
     try {
       // 检查文件是否存在
       if (!fs.existsSync(mediaUrl)) {
+        console.error(`[qqbot] sendMedia error: local file not found: ${mediaUrl}`);
         return {
           channel: "qqbot",
           error: `本地文件不存在: ${mediaUrl}`
@@ -467,14 +478,14 @@ export async function sendMedia(ctx: MediaOutboundContext): Promise<OutboundResu
 
     } catch (readErr) {
       const errMsg = readErr instanceof Error ? readErr.message : String(readErr);
-      console.error(`[qqbot] sendMedia: failed to read local file: ${errMsg}`);
+      console.error(`[qqbot] sendMedia error: failed to read local file: ${errMsg}`);
       return {
         channel: "qqbot",
         error: `读取本地文件失败: ${errMsg}`
       };
     }
   } else if (!isHttpUrl && !isDataUrl) {
-    console.log(`[qqbot] sendMedia: unsupported media format: ${mediaUrl.slice(0, 50)}`);
+    console.error(`[qqbot] sendMedia error: unsupported media format: ${mediaUrl.slice(0, 50)}`);
     return {
       channel: "qqbot",
       error: `不支持的媒体格式: ${mediaUrl.slice(0, 50)}...。支持的格式: 公网 URL (http/https)、Base64 Data URL (data:...) 或本地文件路径。`
@@ -583,69 +594,5 @@ export async function sendMedia(ctx: MediaOutboundContext): Promise<OutboundResu
   }
 }
 
-/**
- * 发送 Cron 触发的消息
- * 
- * 当 OpenClaw cron 任务触发时，消息内容可能是：
- * 1. QQBOT_CRON:{base64} 格式的结构化载荷 - 解码后根据 targetType 和 targetAddress 发送
- * 2. 普通文本 - 直接发送到指定目标
- * 
- * @param account - 账户配置
- * @param to - 目标地址（作为后备，如果载荷中没有指定）
- * @param message - 消息内容（可能是 QQBOT_CRON: 格式或普通文本）
- * @returns 发送结果
- * 
- * @example
- * ```typescript
- * // 处理结构化载荷
- * const result = await sendCronMessage(
- *   account,
- *   "user_openid",  // 后备地址
- *   "QQBOT_CRON:eyJ0eXBlIjoiY3Jvbl9yZW1pbmRlciIs..."  // Base64 编码的载荷
- * );
- * 
- * // 处理普通文本
- * const result = await sendCronMessage(
- *   account,
- *   "user_openid",
- *   "这是一条普通的提醒消息"
- * );
- * ```
- */
-export async function sendCronMessage(
-  account: ResolvedQQBotAccount,
-  to: string,
-  message: string
-): Promise<OutboundResult> {
-  console.log(`[qqbot] sendCronMessage: to=${to}, message length=${message.length}`);
-  
-  // 检测是否是 QQBOT_CRON: 格式的结构化载荷
-  const cronResult = decodeCronPayload(message);
-  
-  if (cronResult.isCronPayload) {
-    if (cronResult.error) {
-      console.error(`[qqbot] sendCronMessage: cron payload decode error: ${cronResult.error}`);
-      return {
-        channel: "qqbot",
-        error: `Cron 载荷解码失败: ${cronResult.error}`
-      };
-    }
-    
-    if (cronResult.payload) {
-      const payload = cronResult.payload;
-      console.log(`[qqbot] sendCronMessage: decoded cron payload, targetType=${payload.targetType}, targetAddress=${payload.targetAddress}`);
-      
-      // 使用载荷中的目标地址和类型发送消息
-      const targetTo = payload.targetType === "group" 
-        ? `group:${payload.targetAddress}` 
-        : payload.targetAddress;
-      
-      // 发送提醒内容
-      return await sendProactiveMessage(account, targetTo, payload.content);
-    }
-  }
-  
-  // 非结构化载荷，作为普通文本处理
-  console.log(`[qqbot] sendCronMessage: plain text message, sending to ${to}`);
-  return await sendProactiveMessage(account, to, message);
-}
+
+

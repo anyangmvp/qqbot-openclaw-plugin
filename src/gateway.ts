@@ -8,7 +8,7 @@ import { recordKnownUser, flushKnownUsers } from "./known-users.js";
 import { getQQBotRuntime } from "./runtime.js";
 import { startImageServer, isImageServerRunning, downloadFile, type ImageServerConfig } from "./image-server.js";
 import { getImageSize, formatQQBotMarkdownImage, hasQQBotImageSize, DEFAULT_IMAGE_SIZE } from "./utils/image-size.js";
-import { parseQQBotPayload, encodePayloadForCron, isCronReminderPayload, isMediaPayload, type CronReminderPayload, type MediaPayload } from "./utils/payload.js";
+import { parseQQBotPayload, isMediaPayload, type MediaPayload } from "./utils/payload.js";
 import { convertSilkToWav, isVoiceAttachment, isVideoAttachment, isImageAttachment, formatDuration, needsSilkConversion, convertAudioToSilk, convertAudioDataToSilk, isFfmpegAvailable } from "./utils/audio-convert.js";
 
 // QQ Bot intents - 按权限级别分组
@@ -285,20 +285,22 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     if (messageQueue.length >= MESSAGE_QUEUE_SIZE) {
       // 队列满了，丢弃最旧的消息
       const dropped = messageQueue.shift();
-      log?.error(`[qqbot:${account.accountId}] Message queue full, dropping oldest message from ${dropped?.senderId}`);
+      log?.error(`[qqbot:${account.accountId}] Message queue full, dropping oldest message from ${dropped?.senderId}, type: ${dropped?.type}`);
     }
     if (messageQueue.length >= MESSAGE_QUEUE_WARN_THRESHOLD) {
-      log?.info(`[qqbot:${account.accountId}] Message queue size: ${messageQueue.length}/${MESSAGE_QUEUE_SIZE}`);
+      log?.info?.(`[qqbot:${account.accountId}] Message queue size warning: ${messageQueue.length}/${MESSAGE_QUEUE_SIZE}`);
     }
     messageQueue.push(msg);
-    log?.debug?.(`[qqbot:${account.accountId}] Message enqueued, queue size: ${messageQueue.length}`);
+    log?.debug?.(`[qqbot:${account.accountId}] Message enqueued: type=${msg.type}, senderId=${msg.senderId}, queue size: ${messageQueue.length}`);
   };
 
   /**
    * 启动消息处理循环（独立于 WS 消息循环）
    */
   const startMessageProcessor = (handleMessageFn: (msg: QueuedMessage) => Promise<void>): void => {
-    if (messageProcessorRunning) return;
+    if (messageProcessorRunning) {
+      return;
+    }
     messageProcessorRunning = true;
 
     const processLoop = async () => {
@@ -315,11 +317,11 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           messagesProcessed++;
         } catch (err) {
           // 捕获处理异常，防止影响队列循环
-          log?.error(`[qqbot:${account.accountId}] Message processor error: ${err}`);
+          log?.error(`[qqbot:${account.accountId}] Message processor error: ${err}, messageId=${msg.messageId}`);
         }
       }
       messageProcessorRunning = false;
-      log?.info(`[qqbot:${account.accountId}] Message processor stopped`);
+      log?.info(`[qqbot:${account.accountId}] Message processor stopped, total processed: ${messagesProcessed}`);
     };
 
     // 异步启动，不阻塞调用者
@@ -327,8 +329,6 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
       log?.error(`[qqbot:${account.accountId}] Message processor crashed: ${err}`);
       messageProcessorRunning = false;
     });
-
-    log?.info(`[qqbot:${account.accountId}] Message processor started`);
   };
 
   abortSignal.addEventListener("abort", () => {
@@ -357,12 +357,16 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 
   const getReconnectDelay = () => {
     const idx = Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1);
-    return RECONNECT_DELAYS[idx];
+    const delay = RECONNECT_DELAYS[idx];
+    return delay;
   };
 
   const scheduleReconnect = (customDelay?: number) => {
-    if (isAborted || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      log?.error(`[qqbot:${account.accountId}] Max reconnect attempts reached or aborted`);
+    if (isAborted) {
+      return;
+    }
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      log?.error(`[qqbot:${account.accountId}] Reached max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}), stopping reconnect`);
       return;
     }
 
@@ -374,7 +378,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 
     const delay = customDelay ?? getReconnectDelay();
     reconnectAttempts++;
-    log?.info(`[qqbot:${account.accountId}] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})`);
+    log?.info(`[qqbot:${account.accountId}] Reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
 
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -429,6 +433,9 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
         log?.debug?.(`[qqbot:${account.accountId}] Received message: ${JSON.stringify(event)}`);
         if (event.attachments?.length) {
           log?.info(`[qqbot:${account.accountId}] Attachments: ${event.attachments.length}`);
+          event.attachments.forEach((att, idx) => {
+            log?.debug?.(`[qqbot:${account.accountId}] Attachment[${idx}]: filename=${att.filename}, content_type=${att.content_type}`);
+          });
         }
 
         pluginRuntime.channel.activity.record({
@@ -474,91 +481,25 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 - 消息类型: ${isGroupChat ? "群聊" : "私聊"}
 - 当前消息 message_id: ${event.messageId}${isGroupChat ? `
 - 群组 group_openid: ${event.groupOpenid}` : ""}
+`;
 
-【当前毫秒时间戳】${nowMs}
-举例：3分钟后 atMs = ${nowMs} + 180000 = ${nowMs + 180000}，5分钟后 = ${nowMs + 300000}
-
-【Scheduled Reminder — Must Read】
-When setting a reminder, the cron tool's payload must use agentTurn (not systemEvent! systemEvent won't send QQ messages).
-Correct example (one-time reminder, N minutes later):
-{
-  "action": "add",
-  "job": {
-    "name": "reminder name",
-    "schedule": { "kind": "at", "atMs": ${nowMs} + N*60000 },
-    "sessionTarget": "isolated",
-    "wakeMode": "now",
-    "deleteAfterRun": true,
-    "payload": {
-      "kind": "agentTurn",
-      "message": "You are a warm-hearted reminder assistant. Remind the user in a warm and interesting way: {reminder content}. Requirements: (1) Do not reply with HEARTBEAT_OK (2) Do not explain who you are (3) Output a warm reminder message directly (4) You can add a short inspirational or caring sentence (5) Keep it within 2-3 sentences (6) Use emojis to decorate",
-      "deliver": true,
-      "channel": "qqbot",
-      "to": "${targetAddress}"
-    }
-  }
-}
-Key points:
-(1) payload.kind must be "agentTurn"
-(2) deliver/channel/to are all required
-(3) atMs should use the calculated number above (e.g., for 3 minutes later, fill in ${nowMs + 180000})
-(4) For periodic tasks, use schedule.kind="cron" + expr + tz="Asia/Shanghai"
-`
-
-        // 🎯 发送图片功能：使用 <qqimg> 标签发送本地或网络图片
-        // 系统会自动将本地文件转换为 Base64 发送，不需要图床服务器
+        // 🎯 富媒体消息功能：使用标签发送图片、视频、语音
         builtinPrompt += `
+【发送富媒体消息】
+发送图片、视频或语音时，直接在文本消息中使用对应标签包裹文件路径输出即可, 不要使用message tools：
 
-【发送图片】
-你可以直接发送图片给用户！使用 <qqimg> 标签包裹图片路径：
-
-<qqimg>图片路径</qqimg>
-
-示例：
-- <qqimg>/Users/xxx/images/photo.jpg</qqimg>  （本地文件）
-- <qqimg>https://example.com/image.png</qqimg>  （网络图片）
-
-⚠️ 注意：
-- 必须使用 <qqimg>路径</qqimg> 格式
-- 本地路径必须是绝对路径，支持 png、jpg、jpeg、gif、webp 格式
-- 图片文件/URL 必须有效，否则发送失败
-- Markdown格式下，也必须使用该方式发送图片
-
-【发送视频】
-你可以直接发送视频给用户！使用 <qqvideo> 标签包裹视频路径：
-
-<qqvideo>视频路径</qqvideo>
+<qqimg>图片路径</qqimg>    - 发送图片（png/jpg/gif/webp）
+<qqvideo>视频路径</qqvideo>  - 发送视频（mp4/mov/avi）
+<qqvoice>语音路径</qqvoice>  - 发送语音（mp3/wav/ogg/silk）
 
 示例：
-- <qqvideo>/Users/xxx/videos/demo.mp4</qqvideo>  （本地文件）
-- <qqvideo>https://example.com/video.mp4</qqvideo>  （网络视频）
+- 带图片的问候：<qqimg>/home/user/photo.jpg</qqimg> 早上好！这是今天的风景照~
+- 发送视频：看看这个视频 <qqvideo>/tmp/demo.mp4</qqvideo>
+- 发送语音：<qqvoice>/tmp/voice.mp3</qqvoice> 你好，这是一条语音消息
 
 ⚠️ 注意：
-- 必须使用 <qqvideo>路径</qqvideo> 格式
-- 本地路径必须是绝对路径，支持 mp4、mov、avi 格式
-- 视频文件/URL 必须有效，否则发送失败
-
-【发送语音】
-你可以直接发送语音给用户！使用 <qqvoice> 标签包裹语音文件路径：
-
-<qqvoice>语音路径</qqvoice>
-
-示例：
-- <qqvoice>/Users/xxx/voice/message.mp3</qqvoice>  （本地 MP3 文件）
-- <qqvoice>/Users/xxx/voice/recording.wav</qqvoice>  （本地 WAV 文件）
-- <qqvoice>https://example.com/audio.mp3</qqvoice>  （网络音频）
-
-⚠️ 注意：
-- 必须使用 <qqvoice>路径</qqvoice> 格式
 - 本地路径必须是绝对路径
-- 支持多种格式：mp3、wav、ogg、flac、aac、m4a、silk（自动转换为 SILK 格式）
-- 系统会自动将音频转换为 QQ 要求的 SILK 格式
-- 语音文件/URL 必须有效，否则发送失败`;
-
-        builtinPrompt += `
-
-【Tool and skills usage guide】
-When users ask you to perform tasks, consider using the available skills to complete them efficiently. For example, you can leverage bash commands, file operations, or other tools to achieve the desired outcome. Always aim to provide accurate and helpful responses by utilizing the most appropriate skill for the task at hand.
+- 文件必须存在且格式正确，否则发送失败
 `;
         
         const systemPrompts = [builtinPrompt];
@@ -571,8 +512,10 @@ When users ask you to perform tasks, consider using the available skills to comp
         const imageUrls: string[] = [];
         // 存到 clawdbot 工作目录下的 downloads 文件夹
         const downloadDir = path.join(process.env.HOME || "/home/ubuntu", ".openclaw", "downloads");
+        log?.debug?.(`[qqbot:${account.accountId}] Download directory: ${downloadDir}`);
         
         if (event.attachments?.length) {
+          log?.info(`[qqbot:${account.accountId}] Start processing ${event.attachments.length} attachments`);
           // ============ 接收附件描述生成（图片 / 语音 / 视频 / 其他） ============
           const imageDescriptions: string[] = [];
           const voiceDescriptions: string[] = [];
@@ -833,7 +776,7 @@ When users ask you to perform tasks, consider using the available skills to comp
                   timeoutId = null;
                 }
 
-                log?.info(`[qqbot:${account.accountId}] deliver called, kind: ${info.kind}, payload keys: ${Object.keys(payload).join(", ")}`);
+                log?.info(`[qqbot:${account.accountId}] deliver called, kind: ${info.kind}, payload keys: ${Object.keys(payload).join(", ")}, text长度: ${payload.text?.length || 0}`);
 
                 let replyText = payload.text ?? "";
                 
@@ -1191,39 +1134,7 @@ When users ask you to perform tasks, consider using the available skills to comp
                     const parsedPayload = payloadResult.payload;
                     log?.info(`[qqbot:${account.accountId}] Detected structured payload, type: ${parsedPayload.type}`);
                     
-                    // 根据 type 分发到对应处理器
-                    if (isCronReminderPayload(parsedPayload)) {
-                      // ============ 定时提醒载荷处理 ============
-                      log?.info(`[qqbot:${account.accountId}] Processing cron_reminder payload`);
-                      
-                      // 将载荷编码为 Base64，构建 cron add 命令
-                      const cronMessage = encodePayloadForCron(parsedPayload);
-                      
-                      // 向用户确认提醒已设置（通过正常消息发送）
-                      const confirmText = `⏰ 提醒已设置，将在指定时间发送: "${parsedPayload.content}"`;
-                      try {
-                        await sendWithTokenRetry(async (token) => {
-                          if (event.type === "c2c") {
-                            await sendC2CMessage(token, event.senderId, confirmText, event.messageId);
-                          } else if (event.type === "group" && event.groupOpenid) {
-                            await sendGroupMessage(token, event.groupOpenid, confirmText, event.messageId);
-                          } else if (event.channelId) {
-                            await sendChannelMessage(token, event.channelId, confirmText, event.messageId);
-                          }
-                        });
-                        log?.info(`[qqbot:${account.accountId}] Cron reminder confirmation sent, cronMessage: ${cronMessage}`);
-                      } catch (err) {
-                        log?.error(`[qqbot:${account.accountId}] Failed to send cron confirmation: ${err}`);
-                      }
-                      
-                      // 记录活动并返回（cron add 命令需要由 AI 执行，这里只处理载荷）
-                      pluginRuntime.channel.activity.record({
-                        channel: "qqbot",
-                        accountId: account.accountId,
-                        direction: "outbound",
-                      });
-                      return;
-                    } else if (isMediaPayload(parsedPayload)) {
+                    if (isMediaPayload(parsedPayload)) {
                       // ============ 媒体消息载荷处理 ============
                       log?.info(`[qqbot:${account.accountId}] Processing media payload, mediaType: ${parsedPayload.mediaType}`);
                       
@@ -1400,7 +1311,6 @@ When users ask you to perform tasks, consider using the available skills to comp
                 
                 // 判断是否使用 markdown 模式
                 const useMarkdown = account.markdownSupport === true;
-                log?.info(`[qqbot:${account.accountId}] Markdown mode: ${useMarkdown}, images: ${imageUrls.length}`);
                 
                 let textWithoutImages = replyText;
                 
@@ -1426,8 +1336,6 @@ When users ask you to perform tasks, consider using the available skills to comp
                       httpImageUrls.push(url);
                     }
                   }
-                  
-                  log?.info(`[qqbot:${account.accountId}] Image classification: httpUrls=${httpImageUrls.length}, base64=${base64ImageUrls.length}`);
                   
                   // 🔹 第一步：通过富媒体 API 发送 Base64 图片（本地文件已转换为 Base64）
                   if (base64ImageUrls.length > 0) {
@@ -1625,7 +1533,7 @@ When users ask you to perform tasks, consider using the available skills to comp
       };
 
       ws.on("open", () => {
-        log?.info(`[qqbot:${account.accountId}] WebSocket connected`);
+        log?.info(`[qqbot:${account.accountId}] WebSocket connected successfully`);
         isConnecting = false; // 连接完成，释放锁
         reconnectAttempts = 0; // 连接成功，重置重试计数
         lastConnectTime = Date.now(); // 记录连接时间
@@ -1658,15 +1566,15 @@ When users ask you to perform tasks, consider using the available skills to comp
             }
           }
 
-          log?.debug?.(`[qqbot:${account.accountId}] Received op=${op} t=${t}`);
+          log?.debug?.(`[qqbot:${account.accountId}] Received op=${op} t=${t} s=${s}`);
 
           switch (op) {
             case 10: // Hello
-              log?.info(`[qqbot:${account.accountId}] Hello received`);
+              log?.info(`[qqbot:${account.accountId}] Hello received from server`);
               
               // 如果有 session_id，尝试 Resume
               if (sessionId && lastSeq !== null) {
-                log?.info(`[qqbot:${account.accountId}] Attempting to resume session ${sessionId}`);
+                log?.info(`[qqbot:${account.accountId}] Attempting to resume session ${sessionId}, lastSeq=${lastSeq}`);
                 ws.send(JSON.stringify({
                   op: 6, // Resume
                   d: {
@@ -1697,7 +1605,7 @@ When users ask you to perform tasks, consider using the available skills to comp
               heartbeatInterval = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
                   ws.send(JSON.stringify({ op: 1, d: lastSeq }));
-                  log?.debug?.(`[qqbot:${account.accountId}] Heartbeat sent`);
+                  log?.debug?.(`[qqbot:${account.accountId}] Heartbeat sent (seq=${lastSeq})`);
                 }
               }, interval);
               break;
@@ -1721,7 +1629,7 @@ When users ask you to perform tasks, consider using the available skills to comp
                 });
                 onReady?.(d);
               } else if (t === "RESUMED") {
-                log?.info(`[qqbot:${account.accountId}] Session resumed`);
+                log?.info(`[qqbot:${account.accountId}] Session resumed successfully`);
                 // P1-2: 更新 Session 连接时间
                 if (sessionId) {
                   saveSession({
@@ -1853,7 +1761,8 @@ When users ask you to perform tasks, consider using the available skills to comp
       });
 
       ws.on("close", (code, reason) => {
-        log?.info(`[qqbot:${account.accountId}] WebSocket closed: ${code} ${reason.toString()}`);
+        const reasonStr = reason.toString();
+        log?.info(`[qqbot:${account.accountId}] WebSocket closed: code=${code}, reason=${reasonStr || "(empty)"}`);
         isConnecting = false; // 释放锁
         
         // 根据错误码处理
@@ -1884,7 +1793,7 @@ When users ask you to perform tasks, consider using the available skills to comp
         const connectionDuration = Date.now() - lastConnectTime;
         if (connectionDuration < QUICK_DISCONNECT_THRESHOLD && lastConnectTime > 0) {
           quickDisconnectCount++;
-          log?.info(`[qqbot:${account.accountId}] Quick disconnect detected (${connectionDuration}ms), count: ${quickDisconnectCount}`);
+          log?.info?.(`[qqbot:${account.accountId}] Quick disconnect detected (${connectionDuration}ms), count: ${quickDisconnectCount}/${MAX_QUICK_DISCONNECT_COUNT}`);
           
           // 如果连续快速断开超过阈值，等待更长时间
           if (quickDisconnectCount >= MAX_QUICK_DISCONNECT_COUNT) {
@@ -1900,7 +1809,9 @@ When users ask you to perform tasks, consider using the available skills to comp
           }
         } else {
           // 连接持续时间够长，重置计数
-          quickDisconnectCount = 0;
+          if (quickDisconnectCount > 0) {
+            quickDisconnectCount = 0;
+          }
         }
         
         cleanup();
@@ -1936,6 +1847,8 @@ When users ask you to perform tasks, consider using the available skills to comp
 
   // 等待 abort 信号
   return new Promise((resolve) => {
-    abortSignal.addEventListener("abort", () => resolve());
+    abortSignal.addEventListener("abort", () => {
+      resolve();
+    });
   });
 }
